@@ -1,106 +1,90 @@
-import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import pickle
-import datetime
-import numba
+from vectorized_functions import *
 
-df = pd.read_json("data.json")
+# input data of open/close events. One row per event
+oc_events = pd.read_json("data.json")
 
-df = df['fields'].apply(pd.Series)
+# reorganise input data:
+oc_events = oc_events['fields'].apply(pd.Series)
+oc_events['Datetime'] = pd.to_datetime(oc_events['time'])
+oc_events["Date"] = oc_events['Datetime'].dt.date
+oc_events['next_event_time'] = oc_events['Datetime'].shift(-1)
+oc_events['event_time'] = oc_events['Datetime']
+oc_events = oc_events.set_index(['Datetime']).drop(['time'], axis=1)
 
-df['Datetime'] = pd.to_datetime(df['time'])
-df["Date"] = df['Datetime'].dt.date
-df['next_event_time'] = df['Datetime'].shift(-1)
-df['event_time']= df['Datetime']
-df = df.set_index(['Datetime']).drop(['time'], axis=1)
+# dataframe for modelling will contain one row per hour instead of event
+start_dt = oc_events.Date.min()
+end_dt = oc_events.Date.max()
 
-start_dt = df.Date.min()
-end_dt = df.Date.max()
+index = pd.date_range(start=start_dt, end=end_dt, freq='H')
 
-index = pd.date_range(start= start_dt, end= end_dt, freq= 'H')
+timestamp_df = pd.merge_asof(pd.DataFrame(index=index), oc_events, left_index=True, right_index=True)
 
-df2 = pd.merge_asof(pd.DataFrame(index=index), df, left_index=True, right_index=True)
+# timestamps before first event are still N/A/ To be set to the opposite of first event
+# next event timestamps before first event are still N/A/ To be set to the first event timestamp
+# others N/A values are not used and left as is.
+opposite_of_first_event = not(timestamp_df['is_open'].loc[timestamp_df['is_open'].first_valid_index()])
+first_event_time = timestamp_df['event_time'].loc[timestamp_df['event_time'].first_valid_index()]
 
-#Fill NAs first before fixing open flag
-#Column open: Start with opposite of first event.
-#Next event time = first event time
-#event time: lowest event minus 1 day
-opposite_of_first_event = not(df2['is_open'].loc[df2['is_open'].first_valid_index()])
-first_event_time = df2['event_time'].loc[df2['event_time'].first_valid_index()]
-#first_event_minus_day = first_event_time - pd.Timedelta(days=1)
+timestamp_df['is_open'] = timestamp_df['is_open'].fillna(opposite_of_first_event)
+timestamp_df['next_event_time'] = timestamp_df['next_event_time'].fillna(first_event_time)
+timestamp_df = timestamp_df.drop(['event_time'], axis=1)
 
+# replace timestamps with time differences (minutes to the next event)
+timestamp_df['minutes_to_next_event'] = -(timestamp_df.index - timestamp_df['next_event_time']).astype('timedelta64[m]')
+timestamp_df = timestamp_df.drop(['next_event_time'], axis=1)
 
-df2['is_open']= df2['is_open'].fillna(opposite_of_first_event)
-df2['next_event_time']= df2['next_event_time'].fillna(first_event_time)
-#df2['event_time']= df2['event_time'].fillna(first_event_minus_day)
-df3 =df2.drop(['event_time'], axis=1)
+# add %age of time open over the hour row as a feature (from vectorized_functions file)
 
+timestamp_df['open_pct'] = percentage_open(timestamp_df['is_open'].values, timestamp_df['minutes_to_next_event'].values)
 
-#replace timestamps with time differences
-df3['minutes_to_next_event'] = -(df3.index - df3['next_event_time']).astype('timedelta64[m]')
-df4 = df3.drop(['next_event_time'], axis=1)
+# new open flag derived from percentage (otherwise opening at 18:01 would consider 18:00 as closed and 19:00 as open
 
-#flip open value when next event is less than 30 minutes after
+timestamp_df['Open_flg_pct'] = open_flag_from_pct(timestamp_df['open_pct'].values)
 
-#Additional variables:
-#%age open
-#Open flag if >50% open
+# Additional simple features (Day, Month, Holiday flag, Exam flag). Some to be one-hot encoded later.
+# Holiday set to Jun 15th to Sep 15th and Dec 15th to Jan 20th
+# Exam set to May 1st to Jun 16th and  Dec 1st to Jan 20th
 
 
-#%age open
-@numba.vectorize
-def percentage_open(is_open, minutes_to_event):
-    out_val = max(0,60-minutes_to_event) / 60
-    if is_open:
-        out_val = min(60,minutes_to_event) / 60
-    return out_val
+timestamp_df['day'] = timestamp_df.index.day
+timestamp_df['month'] = timestamp_df.index.month
 
-df4['open_pct'] = percentage_open(df4['is_open'].values, df4['minutes_to_next_event'].values)
+timestamp_df['is_holiday'] = 0
+timestamp_df['is_exam'] = 0
 
-#%Open flag
-@numba.vectorize
-def open_flag_from_pct(percentage_open):
-    out_val = True
-    if percentage_open <0.5:
-        out_val = False
-    return out_val
+holiday_row_index = ((timestamp_df['month'] == 6) & (timestamp_df['day'] > 15)) \
+                    | (timestamp_df['month'].isin([7, 8])) \
+                    | ((timestamp_df['month'] == 9) & (timestamp_df['day'] < 15)) \
+                    | ((timestamp_df['month'] == 12) & (timestamp_df['day'] > 15)) \
+                    | ((timestamp_df['month'] == 1) & (timestamp_df['day'] > 20))
 
-df4['Open_flg_pct'] = open_flag_from_pct(df4['open_pct'].values)
+exam_row_index = ((timestamp_df['month'] == 6) & (timestamp_df['day'] <= 15)) \
+                 | (timestamp_df['month'].isin([5, 12])) \
+                 | ((timestamp_df['month'] == 1) & (timestamp_df['day'] <= 20))
 
-df5 = df4.copy()
-#Features:
-#Day
-df5['day'] = df5.index.day
+timestamp_df.loc[holiday_row_index, 'is_holiday'] = 1
+timestamp_df.loc[exam_row_index, 'is_exam'] = 1
 
-#Month
-df5['month'] = df5.index.month
+# More complex feature: Average pct open for the same hour over the last X weekdays (for X in "window_size_list" below).
+# The same is done for the average opening percentage of the same hour + or - 1 or 0 hour (similar with _pm1 suffix)
 
-#Holiday flag & exam flag
-df5['is_holiday'] = 0
-df5['is_exam'] = 0
-holiday_row_index = ((df5['month']== 6) & (df5['day'] > 15)) | (df5['month'].isin([7, 8])) \
-| ((df5['month']== 9) & (df5['day'] < 15)) | ((df5['month']== 12) & (df5['day'] > 15)) \
-| ((df5['month']== 1) & (df5['day'] > 20))
 
-exam_row_index = ((df5['month']== 6) & (df5['day'] <= 15)) | (df5['month'].isin([5, 12])) \
-| ((df5['month']== 1) & (df5['day'] <= 20))
-
-df5.loc[holiday_row_index, 'is_holiday'] = 1
-df5.loc[exam_row_index, 'is_exam'] = 1
-
-# %age open same hour last X weekdays.
-df5['hour'] = df5.index.hour
-df5['weekday'] = df5.index.dayofweek
-df5['open_last_2'] = 0
+timestamp_df['hour'] = timestamp_df.index.hour
+timestamp_df['weekday'] = timestamp_df.index.dayofweek
+timestamp_df['open_last_2'] = 0
 
 window_size_list = [2, 3, 5, 10, 15]
 
+# Function applying the rolling window sum function  for a given set of rows (weekday, hour),
+# for a given feature (open_pct) and window size.
+# Adds the result as a new feature, with name given by the result_column parameter
 
-# rolling window. For a certain mask (weekday, hour), for a certain variable (open_pct), certain rolling number (2),
-# and give a certain name (feature)
 
-def sum_last_x_values_subset(df, row_indexer, column_to_sum, window_size, result_column):
-    rolling_series = df.loc[row_indexer, [column_to_sum]].rolling(window_size).sum()[column_to_sum].round(
+def sum_last_x_values_subset(df, row_indexer, column_to_sum, window_s, result_column):
+    rolling_series = df.loc[row_indexer, [column_to_sum]].rolling(window_s).sum()[column_to_sum].round(
         2).abs()  # rounded and abs for floating point near 0 values
     df.loc[mask, [result_column]] = rolling_series.fillna(rolling_series.mean())  # defaulted at average value
 
@@ -108,21 +92,46 @@ def sum_last_x_values_subset(df, row_indexer, column_to_sum, window_size, result
 for window_size in window_size_list:
 
     feature_same_hour = "open_last_" + str(window_size) + "_same"
-    df5[feature_same_hour] = 0
+    timestamp_df[feature_same_hour] = 0
     feature_pm1_hour = "open_last_" + str(window_size) + "_pm1"
-    df5[feature_pm1_hour] = 0
+    timestamp_df[feature_pm1_hour] = 0
 
     for i in range(24):
         # mask: Weekday + hour = i
 
-        mask = (df5['weekday'].isin(list(range(1, 6)))) & (df5['hour'] == i)
-        sum_last_x_values_subset(df5, mask, 'open_pct', window_size, feature_same_hour)
+        mask = (timestamp_df['weekday'].isin(list(range(1, 6)))) & (timestamp_df['hour'] == i)
+        sum_last_x_values_subset(timestamp_df, mask, 'open_pct', window_size, feature_same_hour)
 
-        mask_pm1 = (df5['weekday'].isin(list(range(1, 6)))) & (df5['hour'].isin([i - 1, i, i + 1]))
-        sum_last_x_values_subset(df5, mask_pm1, 'open_pct', window_size, feature_pm1_hour)
+        mask_pm1 = (timestamp_df['weekday'].isin(list(range(1, 6)))) & (timestamp_df['hour'].isin([i - 1, i, i + 1]))
+        sum_last_x_values_subset(timestamp_df, mask_pm1, 'open_pct', window_size*3, feature_pm1_hour)
+
+    # turning sum to average (unimportant if features are normalised later, but better for understanding)
+    timestamp_df[feature_same_hour] = timestamp_df[feature_same_hour] / window_size
+    timestamp_df[feature_pm1_hour] = timestamp_df[feature_pm1_hour] / window_size*3
 
 
-#show histor of pct Open per hour. See if distance from mean makes sense
-#get hour column
-#get average pct_open per hour
-#histogram
+# bar chart of pct Open per hour.
+timestamp_df[['hour', 'open_pct']].groupby(['hour']).mean().plot(kind='bar')
+plt.show()
+
+# Maximal opening around 15h and symatrical around it.
+# We create a "distance to 15:00" feature that should be easier for certain models to learn from
+
+timestamp_df['dist_to_15'] = dist_to_h(timestamp_df['hour'].values, 15)
+timestamp_df[['dist_to_15', 'open_pct']].groupby(['dist_to_15']).mean().plot(kind='bar')
+plt.show()
+
+# One-hot encore day and month values (using pandas built-in tool directly rather than sklearn)
+day_dict = {0: "Mon", 1: "Tue", 2: "Wed", 3: "Thu", 4: "Fri", 5: "Sat", 6: "Sun"}
+month_dict = {1: "Jan", 2: "Feb", 3: "Mar", 4: "Apr", 5: "May", 6: "Jun",
+              7: "Jul", 8: "Aug", 9: "Sep", 10: "Oct", 11: "Nov", 12: "Dec"}
+
+timestamp_df['weekday'] = timestamp_df['weekday'].map(day_dict)
+timestamp_df['month'] = timestamp_df['month'].map(month_dict)
+
+weekday_df = pd.get_dummies(timestamp_df['weekday'])
+month_df = pd.get_dummies(timestamp_df['month'])
+timestamp_df = timestamp_df.join(weekday_df).join(month_df)
+
+# Write the final dataframe for later usage at modelling stage
+pickle.dump(timestamp_df, open("data.p", "wb"))
