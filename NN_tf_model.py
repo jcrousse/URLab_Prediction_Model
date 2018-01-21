@@ -5,7 +5,7 @@ import tensorflow as tf
 import time
 import pandas as pd
 from nn_graphs import nn_2_layers
-from nn_model import nn_model
+from nn_model import NNModel, NNModelKF
 
 data = pickle.load(open("data.p", "rb"))
 
@@ -27,9 +27,9 @@ X = X.drop(['index', 'is_open', 'Date', 'minutes_to_next_event',
             'Open_flg_pct', 'day', 'month', 'open_pct', 'weekday'], axis=1)
 
 
-myModel = nn_model(nn_2_layers)
+myModel = NNModelKF(nn_2_layers)
+# myModel = nn_model(nn_2_layers)  #to use in order to use a simple train/test split instead of K-fold
 myModel = myModel.train(X, Y, epochs=10, model_id='model1')
-
 y = myModel.predict(X, model_id='model1')
 
 pred_df = pd.DataFrame((np.round_(1/(1+np.exp(-y)))).astype(int))
