@@ -28,7 +28,7 @@ class NNModel:
         self.x, self.y_, self.loss, self.train_step, self.keep_prob, self.y_logits \
             = self.graph_creator(self.graph, kwargs.get('n_features'),  kwargs.get('layers'), learning_rate)
 
-        self.model_id = 'model_id'
+        self.model_id =  kwargs.get('model_id')
         self.epochs = kwargs.get('epochs', 1000)
         self.logging = kwargs.get('logging', 100)
         self.dropout_keep = kwargs.get('dropout_keep', 0.5)

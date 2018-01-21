@@ -11,7 +11,7 @@ data_dict = pickle.load(open("data_dict.p", "rb"))
 epochs = 1000
 learning_rate = 1e-3
 layers = [10, 10]  # Number of units per layer
-model_name = 'model_180121'
+model_name = 'model_180122'
 
 # prepare dataset. Y= target, X = features only.
 m = data.shape[0]
@@ -43,4 +43,4 @@ indices = indices.set_index('date')
 
 result_df = pd.concat([data, predictions, indices], axis=1)
 
-print(result_df)
+pickle.dump(result_df, open("predictions.p", "wb"))
