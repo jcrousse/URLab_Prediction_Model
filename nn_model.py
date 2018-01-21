@@ -4,7 +4,8 @@ import numpy as np
 from sklearn.model_selection import KFold
 from sklearn.model_selection import train_test_split
 
-
+#todo: Split "set hyperparameters" and "train"
+#todo figure out how to return train/test indices
 class NNModel:
     def __init__(self, graph_creator):  # graph is a function to generate a NN graph
         self.graph_creator = graph_creator
@@ -12,12 +13,37 @@ class NNModel:
 
         # TF graph elements, to be initialised by the graph_creator function:
         self.x = self.y_ = self.loss = self.train_step = self.keep_prob = self.y_logits = None
+        # Hyperparameters
+        self.model_id = self.epochs = self.logging = self.dropout_keep = None
 
-    def train(self, x, y, model_id, test_size=0.2, epochs=1000, logging=100, dropout_keep=0.5):
+    def set_hyperparameters(self, model_id, layers, n_features, test_size=0.2, epochs=1000, logging=100, dropout_keep=0.5,
+              learning_rate=1e-3):
+        self.x, self.y_, self.loss, self.train_step, self.keep_prob, self.y_logits \
+            = self.graph_creator(self.graph, n_features, layers, learning_rate)
+
+        self.model_id = model_id
+        self.epochs = epochs
+        self.logging = logging
+        self.dropout_keep =dropout_keep
+
+        self.test_size = test_size # depend on sub class
+
+        return self
+
+    def train2(self, x, y):
+
+        train_set, test_set, train_label, test_label = train_test_split(x, y, test_size=self.test_size)
+        self.training(train_set, test_set, train_label, test_label, self.logging, self.model_id, self.epochs, self.dropout_keep)
+        print('Training finished')
+
+        return self
+
+    def train(self, x, y, model_id, layers, test_size=0.2, epochs=1000, logging=100, dropout_keep=0.5,
+              learning_rate=1e-3):
         train_set, test_set, train_label, test_label = train_test_split(x, y, test_size=test_size)
         X = np.array(x)
         self.x, self.y_, self.loss, self.train_step, self.keep_prob, self.y_logits \
-            = self.graph_creator(self.graph, X.shape[1], [10, 10], 0.1)
+            = self.graph_creator(self.graph, X.shape[1], layers, learning_rate)
 
         self.training(train_set, test_set, train_label, test_label, logging, model_id, epochs, dropout_keep)
         print('Training finished')
@@ -71,7 +97,8 @@ class NNModelKF(NNModel):
         super(NNModelKF, self).__init__(graph_creator)
         self.id_kf = 0  # id for currently active fold
 
-    def train(self, x, y, model_id, n_splits_cv=5, epochs=1000, logging=100, dropout_keep=0.5):
+    def train(self, x, y, model_id, layers, n_splits_cv=5, epochs=1000, logging=100, dropout_keep=0.5,
+              learning_rate=1e-3):
         # We use K-fold cross validation to experiment and get a feel of the variance around predictive power
         kf = KFold(n_splits=n_splits_cv, shuffle=True, random_state=1)
         kf.get_n_splits(x)
@@ -79,7 +106,7 @@ class NNModelKF(NNModel):
         Y = np.array(y)
 
         self.x, self.y_, self.loss, self.train_step, self.keep_prob, self.y_logits \
-            = self.graph_creator(self.graph, X.shape[1], [10, 10], 0.1)
+            = self.graph_creator(self.graph, X.shape[1], layers, learning_rate)
 
         for id_kf, (train_index, test_index) in enumerate(kf.split(X)):
             train_set, test_set = X[train_index], X[test_index]
