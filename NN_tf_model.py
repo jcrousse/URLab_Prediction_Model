@@ -27,12 +27,13 @@ X = X.drop(['index', 'is_open', 'Date', 'minutes_to_next_event',
             'Open_flg_pct', 'day', 'month', 'open_pct', 'weekday'], axis=1)
 
 
-mymodel = nn_model(nn_2_layers)
-mymodel.train(X, Y, 2)
+myModel = nn_model(nn_2_layers)
+myModel = myModel.train(X, Y, epochs=10, model_id='model1')
 
-y = mymodel.predict(X,Y)
-pred_df =pd.DataFrame((np.round_(1/(1+np.exp(-y)))).astype(int))
-pred_df.columns=["prediction"]
+y = myModel.predict(X, model_id='model1')
+
+pred_df = pd.DataFrame((np.round_(1/(1+np.exp(-y)))).astype(int))
+pred_df.columns = ["prediction"]
 df1 = pred_df
 df2 = data.copy()
 df2['obs_date'] = df2.index
