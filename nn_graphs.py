@@ -12,12 +12,13 @@ def nn_2_layers(graph, n_feat, layers, learning_rate):
         b1 = tf.Variable(tf.constant(0.1, shape=[layers[0]]))
 
         h1 = tf.nn.relu(tf.matmul(x,W1) + b1)
+        h1_drop = tf.nn.dropout(h1, keep_prob)
 
         # Second Layer
         W2 = tf.Variable(tf.truncated_normal([layers[0], layers[1]], stddev=0.1))
         b2 = tf.Variable(tf.constant(0.1, shape=[layers[1]]))
 
-        h2 = tf.nn.relu(tf.matmul(h1, W2) + b2)
+        h2 = tf.nn.relu(tf.matmul(h1_drop, W2) + b2)
 
         # Dropout
         h2_drop = tf.nn.dropout(h2, keep_prob)
