@@ -1,45 +1,32 @@
 import pickle
 import numpy as np
-from sklearn.model_selection import KFold
-import tensorflow as tf
-import time
 import pandas as pd
 from nn_graphs import nn_2_layers
-from nn_model import NNModel, NNModelKF
+from nn_model import NNModelTTS, NNModelKF
 
 data = pickle.load(open("data.p", "rb"))
+data_dict = pickle.load(open("data_dict.p", "rb"))
 
-# NN training parameters
+# NN training parameters. We use default logging, dropout prob and CV split
 epochs = 10
 learning_rate = 1e-3
-logging = 100
-dropout_prop = 0.5
-n_splits_cv = 5
-LAYERS = [10, 10] # Number of units per layer
+layers = [10, 10]  # Number of units per layer
 
 # prepare dataset. Y= target, X = features only.
 m = data.shape[0]
 
-Y = data['Open_flg_pct'].values.reshape(m, 1)
-
-X = data.reset_index()  # Integer index rather than dates for tensorflow
-X = X.drop(['index', 'is_open', 'Date', 'minutes_to_next_event',
-            'Open_flg_pct', 'day', 'month', 'open_pct', 'weekday'], axis=1)
+Y = data[data_dict['target']].values.reshape(m, 1)
+X = data[data_dict['features']].values
 
 
-myModel = NNModelKF(nn_2_layers)
-# myModel = nn_model(nn_2_layers)  #to use in order to use a simple train/test split instead of K-fold
-myModel = myModel.train(X, Y, epochs=10, model_id='model1')
-y = myModel.predict(X, model_id='model1')
+# myModel = NNModel(nn_2_layers)
+#myModel = myModel.train(X, Y, epochs=epochs, model_id='model_1', layers=layers, learning_rate=learning_rate)
+myModel = NNModelTTS(graph_creator=nn_2_layers)
+myModel = myModel.set_hyperparameters(n_features=X.shape[1],  epochs=epochs, model_id='model_1', layers=layers, learning_rate=learning_rate).train(X,Y)
+y = myModel.predict(X, model_id='model_1')
 
-pred_df = pd.DataFrame((np.round_(1/(1+np.exp(-y)))).astype(int))
-pred_df.columns = ["prediction"]
-df1 = pred_df
-df2 = data.copy()
-df2['obs_date'] = df2.index
-df1.reset_index(drop=True, inplace=True)
-df2.reset_index(drop=True, inplace=True)
+prediction_binary = pd.DataFrame((np.round_(1/(1+np.exp(-y)))).astype(int), index=data.index, columns=["prediction"])
 
-result_df = pd.concat( [df1, df2], axis=1)
+result_df = pd.concat([data, prediction_binary], axis=1)
 
-print(pred_df)
+print(result_df)

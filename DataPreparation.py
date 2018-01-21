@@ -133,5 +133,13 @@ weekday_df = pd.get_dummies(timestamp_df['weekday'])
 month_df = pd.get_dummies(timestamp_df['month'])
 timestamp_df = timestamp_df.join(weekday_df).join(month_df)
 
-# Write the final dataframe for later usage at modelling stage
+Non_feature_columns = ['is_open', 'Date', 'minutes_to_next_event','Open_flg_pct', 'day', 'month', 'open_pct', 'weekday']
+data_dictionary = {
+    "target": ['Open_flg_pct'],
+    "features": [col for col in timestamp_df.columns if col not in Non_feature_columns]
+}
+
+# Write the final dataframe and data dictionnary for later usage at modelling stage
 pickle.dump(timestamp_df, open("data.p", "wb"))
+pickle.dump(data_dictionary, open("data_dict.p", "wb"))
+
